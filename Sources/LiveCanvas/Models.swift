@@ -14,7 +14,7 @@ struct WallpaperItem: Identifiable, Codable, Hashable {
         self.id = UUID()
         self.url = url
         self.title = url.deletingPathExtension().lastPathComponent
-        self.duration = AVURLAsset(url: url).duration.seconds
+        self.duration = 0
         self.addedAt = .now
         self.bookmark = try? url.bookmarkData(options: [.withSecurityScope], includingResourceValuesForKeys: nil, relativeTo: nil)
     }
@@ -55,6 +55,7 @@ final class WallpaperLibrary: ObservableObject {
             let item = WallpaperItem(url: url)
             items.append(item)
             selectedID = item.id
+            loadDuration(for: item)
         }
         persist()
     }
@@ -75,6 +76,15 @@ final class WallpaperLibrary: ObservableObject {
     private func persist() {
         guard let data = try? JSONEncoder().encode(items) else { return }
         UserDefaults.standard.set(data, forKey: "wallpaperLibrary")
+    }
+
+    private func loadDuration(for item: WallpaperItem) {
+        Task {
+            let duration = (try? await AVURLAsset(url: item.url).load(.duration).seconds) ?? 0
+            guard let index = items.firstIndex(where: { $0.id == item.id }) else { return }
+            items[index].duration = duration
+            persist()
+        }
     }
 
     private func restore() {
