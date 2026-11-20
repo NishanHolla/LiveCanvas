@@ -8,6 +8,7 @@
     <link rel="icon" href="favicon.svg" type="image/svg+xml">
     <link rel="apple-touch-icon" href="favicon.svg">
     <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="demo.css">
   </head>
   <body>
     <main>
@@ -43,6 +44,12 @@
         <p>Not a browser tab masquerading as a wallpaper. A focused native macOS app that stays out of your way.</p>
       </section>
 
+      <section class="interactive" id="demo">
+        <div class="demo-heading"><p class="eyebrow">INTERACTIVE DEMO</p><h2>Pick a mood.<br>She'll set it.</h2><p>Choose a scene and watch LiveCanvas apply it on a miniature MacBook.</p></div>
+        <div class="laptop-wrap"><div class="laptop-screen" id="laptopScreen" data-theme="aurora"><div class="screen-bar"><i></i><i></i><i></i><span>LiveCanvas</span></div><div class="desktop-scene"><div class="scene-glow"></div><div class="mountain one"></div><div class="mountain two"></div><div class="stars"></div><div class="desktop-dock"><b></b><b></b><b></b><b></b></div></div><div class="mini-window"><strong>LiveCanvas</strong><span id="themeName">Aurora</span><button id="applyButton">Set wallpaper</button></div><div class="girl"><div class="hair"></div><div class="head"></div><div class="body"></div><div class="arm"></div><div class="leg left"></div><div class="leg right"></div></div></div><div class="laptop-base"></div></div>
+        <div class="theme-controls"><button class="theme active" data-theme="aurora"><span></span>Aurora</button><button class="theme" data-theme="sunset"><span></span>Sunset</button><button class="theme" data-theme="ocean"><span></span>Ocean</button></div>
+      </section>
+
       <section class="features" id="how-it-works">
         <div class="section-heading"><p class="eyebrow">THE ESSENTIALS</p><h2>Bring your own<br>atmosphere.</h2></div>
         <div class="feature-grid">
@@ -69,5 +76,6 @@
       <section class="cta"><p class="eyebrow">MAKE THE BACKGROUND YOURS</p><h2>Find a better backdrop.</h2><a class="button primary" href="https://github.com/NishanHolla/LiveCanvas">Explore the project</a></section>
     </main>
     <footer><a class="brand" href="#top"><span></span> LiveCanvas</a><p>Made for macOS. Open source under MIT.</p><a href="https://github.com/NishanHolla/LiveCanvas">GitHub</a></footer>
+    <script>const screen=document.querySelector('#laptopScreen'),name=document.querySelector('#themeName'),apply=document.querySelector('#applyButton'),labels={aurora:'Aurora',sunset:'Sunset',ocean:'Ocean'};document.querySelectorAll('.theme').forEach(button=>button.addEventListener('click',()=>{document.querySelectorAll('.theme').forEach(item=>item.classList.remove('active'));button.classList.add('active');screen.dataset.theme=button.dataset.theme;name.textContent=labels[button.dataset.theme];screen.classList.remove('setting');void screen.offsetWidth;screen.classList.add('setting')}));apply.addEventListener('click',()=>{screen.classList.remove('setting');void screen.offsetWidth;screen.classList.add('setting')});</script>
   </body>
 </html>
