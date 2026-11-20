@@ -5,10 +5,11 @@ An original, local-first macOS live-wallpaper app inspired by the useful interac
 ## Features
 
 - Import local `.mp4` and `.mov` files
-- Loop a selected video behind the desktop on every display
+- One shared AVFoundation decode pipeline rendered across every display
 - Menu-bar Shuffle and Stop controls
 - Persistent local library (only URLs are stored locally)
-- Low Power Mode pause option
+- Automatic pause/resume for Low Power Mode, sleep/wake, fullscreen apps, and display changes
+- Security-scoped bookmarks so imported media remains available after relaunches or moves
 - Native SwiftUI + AppKit + AVFoundation, with no daemon or helper process
 
 ## Requirements
@@ -22,6 +23,15 @@ swift run
 ```
 
 Use **Import** to add a movie, select it, then choose **Set Live Wallpaper**.
+
+### Build an app bundle
+
+```sh
+./scripts/build-app.sh
+open dist/LiveCanvas.app
+```
+
+The script produces an ad-hoc-signed app bundle. To distribute outside your own Mac, sign with a Developer ID Application certificate and notarize the archive with Apple.
 
 ## Deliberate boundaries
 

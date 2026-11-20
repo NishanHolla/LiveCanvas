@@ -4,10 +4,11 @@ import SwiftUI
 
 struct WallpaperItem: Identifiable, Codable, Hashable {
     let id: UUID
-    let url: URL
+    var url: URL
     var title: String
     var duration: Double
     var addedAt: Date
+    fileprivate var bookmark: Data?
 
     init(url: URL) {
         self.id = UUID()
@@ -15,6 +16,7 @@ struct WallpaperItem: Identifiable, Codable, Hashable {
         self.title = url.deletingPathExtension().lastPathComponent
         self.duration = AVURLAsset(url: url).duration.seconds
         self.addedAt = .now
+        self.bookmark = try? url.bookmarkData(options: [.withSecurityScope], includingResourceValuesForKeys: nil, relativeTo: nil)
     }
 }
 
@@ -71,13 +73,24 @@ final class WallpaperLibrary: ObservableObject {
     }
 
     private func persist() {
-        let urls = items.map(\.url.absoluteString)
-        UserDefaults.standard.set(urls, forKey: "wallpaperURLs")
+        guard let data = try? JSONEncoder().encode(items) else { return }
+        UserDefaults.standard.set(data, forKey: "wallpaperLibrary")
     }
 
     private func restore() {
-        let urls = UserDefaults.standard.stringArray(forKey: "wallpaperURLs") ?? []
-        items = urls.compactMap { URL(string: $0) }.filter { FileManager.default.fileExists(atPath: $0.path) }.map(WallpaperItem.init)
+        guard let data = UserDefaults.standard.data(forKey: "wallpaperLibrary"),
+              let saved = try? JSONDecoder().decode([WallpaperItem].self, from: data) else { return }
+        items = saved.compactMap { item -> WallpaperItem? in
+            guard let bookmark = item.bookmark else {
+                return FileManager.default.fileExists(atPath: item.url.path) ? item : nil
+            }
+            var stale = false
+            guard let resolvedURL = try? URL(resolvingBookmarkData: bookmark, options: [.withSecurityScope], relativeTo: nil, bookmarkDataIsStale: &stale),
+                  FileManager.default.fileExists(atPath: resolvedURL.path) else { return nil }
+            var restored = item
+            restored.url = resolvedURL
+            return restored
+        }
         selectedID = items.first?.id
     }
 }

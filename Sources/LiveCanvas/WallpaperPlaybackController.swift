@@ -1,6 +1,5 @@
 import AppKit
 import AVKit
-import Combine
 
 @MainActor
 final class WallpaperPlaybackController: ObservableObject {
@@ -10,6 +9,10 @@ final class WallpaperPlaybackController: ObservableObject {
     private var observers: [NSObjectProtocol] = []
     private var activeItem: WallpaperItem?
     private var policy: PlaybackPolicy = .always
+    private var player: AVQueuePlayer?
+    private var looper: AVPlayerLooper?
+    private var isPolicyPaused = false
+    private var powerMonitor: Timer?
 
     deinit { NotificationCenter.default.removeObserver(self) }
 
@@ -17,9 +20,39 @@ final class WallpaperPlaybackController: ObservableObject {
         stop()
         activeItem = item
         self.policy = policy
+        _ = item.url.startAccessingSecurityScopedResource()
+        let sharedPlayer = AVQueuePlayer()
+        player = sharedPlayer
+        looper = AVPlayerLooper(player: sharedPlayer, templateItem: AVPlayerItem(url: item.url))
+        rebuildPanels()
+        observeLifecycle()
+        isPlaying = true
+        statusText = "Playing \(item.title)"
+        applyPolicy()
+    }
+
+    func stop() {
+        observers.forEach(NotificationCenter.default.removeObserver)
+        observers.removeAll()
+        powerMonitor?.invalidate()
+        powerMonitor = nil
+        panels.forEach { $0.orderOut(nil) }
+        panels.removeAll()
+        player?.pause()
+        player = nil
+        looper = nil
+        activeItem?.url.stopAccessingSecurityScopedResource()
+        activeItem = nil
+        isPolicyPaused = false
+        isPlaying = false
+        statusText = "No wallpaper playing"
+    }
+
+    private func rebuildPanels() {
+        guard let player else { return }
+        panels.forEach { $0.orderOut(nil) }
+        panels.removeAll()
         for screen in NSScreen.screens {
-            let player = AVQueuePlayer(url: item.url)
-            let looper = AVPlayerLooper(player: player, templateItem: AVPlayerItem(url: item.url))
             let view = AVPlayerView(frame: screen.frame)
             view.player = player
             view.controlsStyle = .none
@@ -34,30 +67,11 @@ final class WallpaperPlaybackController: ObservableObject {
             panel.ignoresMouseEvents = true
             panel.contentView = view
             panel.orderFrontRegardless()
-            objc_setAssociatedObject(panel, "player", player, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
-            objc_setAssociatedObject(panel, "looper", looper, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
-            player.play()
             panels.append(panel)
         }
-        observePolicy()
-        isPlaying = true
-        statusText = "Playing \(item.title)"
-        applyPolicy()
     }
 
-    func stop() {
-        observers.forEach(NotificationCenter.default.removeObserver)
-        observers.removeAll()
-        panels.forEach { panel in
-            (objc_getAssociatedObject(panel, "player") as? AVPlayer)?.pause()
-            panel.orderOut(nil)
-        }
-        panels.removeAll()
-        isPlaying = false
-        statusText = "No wallpaper playing"
-    }
-
-    private func observePolicy() {
+    private func observeLifecycle() {
         let center = NotificationCenter.default
         observers = [
             center.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
@@ -65,8 +79,25 @@ final class WallpaperPlaybackController: ObservableObject {
             },
             center.addObserver(forName: NSWorkspace.screensDidSleepNotification, object: nil, queue: .main) { [weak self] _ in
                 Task { @MainActor in self?.pausePlayers() }
+            },
+            center.addObserver(forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main) { [weak self] _ in
+                Task { @MainActor in self?.applyPolicy() }
+            },
+            center.addObserver(forName: NSWorkspace.activeSpaceDidChangeNotification, object: nil, queue: .main) { [weak self] _ in
+                Task { @MainActor in self?.applyPolicy() }
+            },
+            center.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { [weak self] _ in
+                Task { @MainActor in
+                    self?.rebuildPanels()
+                    self?.applyPolicy()
+                }
             }
         ]
+        // AppKit has no power-mode notification on all supported macOS releases.
+        // A low-frequency poll keeps this policy current with negligible overhead.
+        powerMonitor = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.applyPolicy() }
+        }
     }
 
     private func applyPolicy() {
@@ -74,12 +105,40 @@ final class WallpaperPlaybackController: ObservableObject {
         if policy == .pauseOnBattery && ProcessInfo.processInfo.isLowPowerModeEnabled {
             pausePlayers()
             statusText = "Paused for Low Power Mode"
+        } else if policy == .pauseWhenFullscreen && frontmostAppOccupiesAScreen() {
+            pausePlayers()
+            statusText = "Paused for a fullscreen app"
         } else {
             resumePlayers()
             statusText = activeItem.map { "Playing \($0.title)" } ?? "Playing"
         }
     }
 
-    private func pausePlayers() { panels.compactMap { objc_getAssociatedObject($0, "player") as? AVPlayer }.forEach { $0.pause() } }
-    private func resumePlayers() { panels.compactMap { objc_getAssociatedObject($0, "player") as? AVPlayer }.forEach { $0.play() } }
+    private func pausePlayers() {
+        guard !isPolicyPaused else { return }
+        player?.pause()
+        isPolicyPaused = true
+    }
+
+    private func resumePlayers() {
+        guard isPolicyPaused || player?.timeControlStatus != .playing else { return }
+        player?.play()
+        isPolicyPaused = false
+    }
+
+    private func frontmostAppOccupiesAScreen() -> Bool {
+        guard let app = NSWorkspace.shared.frontmostApplication,
+              app.processIdentifier != ProcessInfo.processInfo.processIdentifier else { return false }
+        let options: CGWindowListOption = [.optionOnScreenOnly, .excludeDesktopElements]
+        guard let windows = CGWindowListCopyWindowInfo(options, kCGNullWindowID) as? [[String: Any]] else { return false }
+        return windows.contains { window in
+            guard (window[kCGWindowOwnerPID as String] as? pid_t) == app.processIdentifier,
+                  (window[kCGWindowLayer as String] as? Int ?? 1) == 0,
+                  let bounds = window[kCGWindowBounds as String] as? [String: CGFloat] else { return false }
+            let frame = CGRect(x: bounds["X"] ?? 0, y: bounds["Y"] ?? 0, width: bounds["Width"] ?? 0, height: bounds["Height"] ?? 0)
+            return NSScreen.screens.contains { screen in
+                abs(frame.width - screen.frame.width) < 3 && abs(frame.height - screen.frame.height) < 3
+            }
+        }
+    }
 }
