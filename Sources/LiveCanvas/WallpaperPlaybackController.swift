@@ -22,8 +22,13 @@ final class WallpaperPlaybackController: ObservableObject {
         self.policy = policy
         _ = item.url.startAccessingSecurityScopedResource()
         let sharedPlayer = AVQueuePlayer()
+        // Local, looping files do not need AVFoundation's conservative streaming buffer.
+        // Avoiding that wait makes return-to-desktop resume feel immediate.
+        sharedPlayer.automaticallyWaitsToMinimizeStalling = false
         player = sharedPlayer
-        looper = AVPlayerLooper(player: sharedPlayer, templateItem: AVPlayerItem(url: item.url))
+        let templateItem = AVPlayerItem(url: item.url)
+        templateItem.preferredForwardBufferDuration = 0
+        looper = AVPlayerLooper(player: sharedPlayer, templateItem: templateItem)
         rebuildPanels()
         observeLifecycle()
         isPlaying = true
@@ -81,10 +86,10 @@ final class WallpaperPlaybackController: ObservableObject {
                 Task { @MainActor in self?.pausePlayers() }
             },
             center.addObserver(forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main) { [weak self] _ in
-                Task { @MainActor in self?.applyPolicy() }
+                Task { @MainActor in self?.refreshWorkspacePolicy() }
             },
             center.addObserver(forName: NSWorkspace.activeSpaceDidChangeNotification, object: nil, queue: .main) { [weak self] _ in
-                Task { @MainActor in self?.applyPolicy() }
+                Task { @MainActor in self?.refreshWorkspacePolicy() }
             },
             center.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { [weak self] _ in
                 Task { @MainActor in
@@ -114,6 +119,16 @@ final class WallpaperPlaybackController: ObservableObject {
         }
     }
 
+    /// macOS may announce a space transition before the fullscreen window has
+    /// left the window server. Re-checking on the next run-loop turn prevents
+    /// an old fullscreen frame from delaying desktop playback.
+    private func refreshWorkspacePolicy() {
+        applyPolicy()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) { [weak self] in
+            Task { @MainActor in self?.applyPolicy() }
+        }
+    }
+
     private func pausePlayers() {
         guard !isPolicyPaused else { return }
         player?.pause()
@@ -122,7 +137,7 @@ final class WallpaperPlaybackController: ObservableObject {
 
     private func resumePlayers() {
         guard isPolicyPaused || player?.timeControlStatus != .playing else { return }
-        player?.play()
+        player?.playImmediately(atRate: 1)
         isPolicyPaused = false
     }
 
