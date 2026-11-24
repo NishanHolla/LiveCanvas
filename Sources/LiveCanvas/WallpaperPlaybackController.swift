@@ -69,7 +69,9 @@ final class WallpaperPlaybackController: ObservableObject {
             view.videoGravity = .resizeAspectFill
 
             let panel = NSPanel(contentRect: screen.frame, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false, screen: screen)
-            panel.level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.desktopWindow)))
+            // Above the system's static desktop surface, below normal app windows
+            // and desktop icons. desktopWindow is covered on some external displays.
+            panel.level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.desktopIconWindow)))
             panel.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle]
             panel.isOpaque = true
             panel.backgroundColor = .black
