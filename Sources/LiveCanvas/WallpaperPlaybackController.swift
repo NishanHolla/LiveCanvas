@@ -59,7 +59,11 @@ final class WallpaperPlaybackController: ObservableObject {
             template.preferredForwardBufferDuration = 0
             let looper = AVPlayerLooper(player: player, templateItem: template)
             if let resumeTime, resumeTime.isValid { player.seek(to: resumeTime, toleranceBefore: .zero, toleranceAfter: .zero) }
-            let view = AVPlayerView(frame: screen.frame)
+            // The panel uses global display coordinates, while its content view
+            // must use local coordinates. Using screen.frame here pushed the
+            // secondary display's video outside its own panel.
+            let view = AVPlayerView(frame: NSRect(origin: .zero, size: screen.frame.size))
+            view.autoresizingMask = [.width, .height]
             view.player = player
             view.controlsStyle = .none
             view.videoGravity = .resizeAspectFill
