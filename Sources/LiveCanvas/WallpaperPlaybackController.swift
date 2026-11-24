@@ -9,8 +9,7 @@ final class WallpaperPlaybackController: ObservableObject {
     private var observers: [NSObjectProtocol] = []
     private var activeItem: WallpaperItem?
     private var policy: PlaybackPolicy = .always
-    private var player: AVQueuePlayer?
-    private var looper: AVPlayerLooper?
+    private var pipelines: [RenderPipeline] = []
     private var isPolicyPaused = false
     private var powerMonitor: Timer?
 
@@ -21,14 +20,6 @@ final class WallpaperPlaybackController: ObservableObject {
         activeItem = item
         self.policy = policy
         _ = item.url.startAccessingSecurityScopedResource()
-        let sharedPlayer = AVQueuePlayer()
-        // Local, looping files do not need AVFoundation's conservative streaming buffer.
-        // Avoiding that wait makes return-to-desktop resume feel immediate.
-        sharedPlayer.automaticallyWaitsToMinimizeStalling = false
-        player = sharedPlayer
-        let templateItem = AVPlayerItem(url: item.url)
-        templateItem.preferredForwardBufferDuration = 0
-        looper = AVPlayerLooper(player: sharedPlayer, templateItem: templateItem)
         rebuildPanels()
         observeLifecycle()
         isPlaying = true
@@ -43,9 +34,8 @@ final class WallpaperPlaybackController: ObservableObject {
         powerMonitor = nil
         panels.forEach { $0.orderOut(nil) }
         panels.removeAll()
-        player?.pause()
-        player = nil
-        looper = nil
+        pipelines.forEach { $0.player.pause() }
+        pipelines.removeAll()
         activeItem?.url.stopAccessingSecurityScopedResource()
         activeItem = nil
         isPolicyPaused = false
@@ -54,10 +44,21 @@ final class WallpaperPlaybackController: ObservableObject {
     }
 
     private func rebuildPanels() {
-        guard let player else { return }
+        guard let activeItem else { return }
+        let resumeTime = pipelines.first?.player.currentTime()
+        pipelines.forEach { $0.player.pause() }
+        pipelines.removeAll()
         panels.forEach { $0.orderOut(nil) }
         panels.removeAll()
         for screen in NSScreen.screens {
+            let player = AVQueuePlayer()
+            // AVPlayerView is single-renderer oriented. A dedicated player per
+            // display prevents the secondary screen from stealing video output.
+            player.automaticallyWaitsToMinimizeStalling = false
+            let template = AVPlayerItem(url: activeItem.url)
+            template.preferredForwardBufferDuration = 0
+            let looper = AVPlayerLooper(player: player, templateItem: template)
+            if let resumeTime, resumeTime.isValid { player.seek(to: resumeTime, toleranceBefore: .zero, toleranceAfter: .zero) }
             let view = AVPlayerView(frame: screen.frame)
             view.player = player
             view.controlsStyle = .none
@@ -73,6 +74,7 @@ final class WallpaperPlaybackController: ObservableObject {
             panel.contentView = view
             panel.orderFrontRegardless()
             panels.append(panel)
+            pipelines.append(RenderPipeline(player: player, looper: looper))
         }
     }
 
@@ -131,13 +133,13 @@ final class WallpaperPlaybackController: ObservableObject {
 
     private func pausePlayers() {
         guard !isPolicyPaused else { return }
-        player?.pause()
+        pipelines.forEach { $0.player.pause() }
         isPolicyPaused = true
     }
 
     private func resumePlayers() {
-        guard isPolicyPaused || player?.timeControlStatus != .playing else { return }
-        player?.playImmediately(atRate: 1)
+        guard isPolicyPaused || pipelines.contains(where: { $0.player.timeControlStatus != .playing }) else { return }
+        pipelines.forEach { $0.player.playImmediately(atRate: 1) }
         isPolicyPaused = false
     }
 
@@ -156,4 +158,10 @@ final class WallpaperPlaybackController: ObservableObject {
             }
         }
     }
+}
+
+private struct RenderPipeline {
+    let player: AVQueuePlayer
+    // Strongly retain the looper; AVPlayerLooper stops looping when released.
+    let looper: AVPlayerLooper
 }
